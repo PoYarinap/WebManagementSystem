@@ -64,7 +64,16 @@ export default function AnggaranPage() {
     value: any
   ) => {
     const next = [...anggaranList];
-    next[index] = { ...next[index], [field]: value };
+    if (field === "jatah_harian_opsional" && value > 0) {
+      // Auto-hitung bulanan dari harian × 30
+      next[index] = { ...next[index], jatah_harian_opsional: value, jatah_bulanan: value * 30 };
+    } else if (field === "jatah_bulanan") {
+      // Auto-hitung harian dari bulanan / 30
+      const harian = Math.round(value / 30);
+      next[index] = { ...next[index], jatah_bulanan: value, jatah_harian_opsional: harian };
+    } else {
+      next[index] = { ...next[index], [field]: value };
+    }
     setAnggaranList(next);
   };
 
@@ -297,7 +306,7 @@ export default function AnggaranPage() {
                     />
                   </div>
 
-                  <div className="w-full sm:w-1/3">
+                  <div className="w-full sm:w-1/4">
                     <label className="block text-[10px] uppercase font-semibold text-slate-400 mb-0.5">
                       Jatah Bulanan (Rp)
                     </label>
@@ -319,9 +328,39 @@ export default function AnggaranPage() {
                     </div>
                   </div>
 
+                  <div className="w-full sm:w-1/5">
+                    <label className="block text-[10px] uppercase font-semibold text-slate-400 mb-0.5">
+                      Jatah Harian (Rp)
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2 text-xs font-bold text-slate-400">
+                        Rp
+                      </span>
+                      <input
+                        type="text"
+                        value={
+                          item.jatah_harian_opsional && item.jatah_harian_opsional > 0
+                            ? Number(item.jatah_harian_opsional).toLocaleString("id-ID")
+                            : ""
+                        }
+                        placeholder={Number(Math.round(item.jatah_bulanan / 30)).toLocaleString("id-ID")}
+                        onChange={(e) => {
+                          const num = parseRupiahInput(e.target.value);
+                          handleUpdateItem(idx, "jatah_harian_opsional", num);
+                        }}
+                        className="w-full pl-9 pr-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-900 dark:text-white placeholder:font-normal placeholder:text-slate-300 dark:placeholder:text-slate-600"
+                      />
+                    </div>
+                    <span className="text-[10px] text-slate-400">Kosongkan = otomatis dari bulanan</span>
+                  </div>
+
                   <div className="w-full sm:w-auto flex items-center justify-between sm:justify-end gap-3 self-end sm:self-center pt-1 sm:pt-4">
                     <span className="text-xs text-slate-400">
-                      ~{formatRupiah(Math.round(item.jatah_bulanan / 30))}/hr
+                      ~{formatRupiah(
+                        item.jatah_harian_opsional && item.jatah_harian_opsional > 0
+                          ? item.jatah_harian_opsional
+                          : Math.round(item.jatah_bulanan / 30)
+                      )}/hr
                     </span>
 
                     <button

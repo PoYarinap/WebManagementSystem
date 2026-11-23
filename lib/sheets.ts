@@ -19,7 +19,7 @@ const HEADERS = {
 
 const INITIAL_ANGGARAN: Anggaran[] = [
   { pos: "Tabungan", jatah_bulanan: 150000, jatah_harian_opsional: 0 },
-  { pos: "Makan", jatah_bulanan: 700000, jatah_harian_opsional: 0 },
+  { pos: "Makan", jatah_bulanan: 900000, jatah_harian_opsional: 30000 },
   { pos: "Bensin", jatah_bulanan: 100000, jatah_harian_opsional: 0 },
   { pos: "Kebutuhan Pokok", jatah_bulanan: 150000, jatah_harian_opsional: 0 },
   { pos: "Dana Tak Terduga", jatah_bulanan: 200000, jatah_harian_opsional: 0 },
