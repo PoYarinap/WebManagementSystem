@@ -16,6 +16,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 const NAV_ITEMS = [
   { label: "Dasbor", href: "/", icon: LayoutDashboard },
@@ -30,9 +31,14 @@ export function Navbar() {
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
-  const handleLogout = async () => {
-    if (!confirm("Apakah Anda yakin ingin keluar?")) return;
+  const handleLogout = () => {
+    setShowLogoutConfirm(true);
+  };
+
+  const confirmLogout = async () => {
+    setShowLogoutConfirm(false);
     setLoggingOut(true);
     try {
       await fetch("/api/auth", {
@@ -222,6 +228,18 @@ export function Navbar() {
           <span className="text-[10px] tracking-tight">Riwayat</span>
         </Link>
       </nav>
+
+      {/* Modal Dialog Konfirmasi Logout */}
+      <ConfirmDialog
+        isOpen={showLogoutConfirm}
+        title="Konfirmasi Keluar (Logout)"
+        message="Apakah Anda yakin ingin keluar dari sesi aplikasi Rencana Gaji?"
+        confirmLabel="Ya, Keluar"
+        cancelLabel="Batal"
+        variant="warning"
+        onConfirm={confirmLogout}
+        onCancel={() => setShowLogoutConfirm(false)}
+      />
     </>
   );
 }

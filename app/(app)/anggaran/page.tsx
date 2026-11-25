@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { formatRupiah, parseRupiahInput } from "@/lib/format";
 import { Anggaran, Pengaturan } from "@/lib/types";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ModalPortal } from "@/components/ModalPortal";
 
 export default function AnggaranPage() {
   const [anggaranList, setAnggaranList] = useState<Anggaran[]>([]);
@@ -39,6 +41,9 @@ export default function AnggaranPage() {
   const [editPosName, setEditPosName] = useState("");
   const [editBulananStr, setEditBulananStr] = useState("");
   const [editHarianStr, setEditHarianStr] = useState("");
+
+  // Delete confirm dialog
+  const [posToDeleteIndex, setPosToDeleteIndex] = useState<number | null>(null);
 
   const loadData = async () => {
     try {
@@ -87,10 +92,14 @@ export default function AnggaranPage() {
   };
 
   const handleRemovePos = (index: number) => {
-    const posName = anggaranList[index].pos;
-    if (!confirm(`Hapus pos anggaran "${posName}"?`)) return;
-    const next = anggaranList.filter((_, i) => i !== index);
+    setPosToDeleteIndex(index);
+  };
+
+  const confirmRemovePos = () => {
+    if (posToDeleteIndex === null) return;
+    const next = anggaranList.filter((_, i) => i !== posToDeleteIndex);
     setAnggaranList(next);
+    setPosToDeleteIndex(null);
   };
 
   const openEditModal = (index: number) => {
@@ -511,9 +520,8 @@ export default function AnggaranPage() {
       </div>
 
       {/* Modal Popup Edit Pos Anggaran */}
-      {editingIndex !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-5">
+      <ModalPortal isOpen={editingIndex !== null} onClose={() => setEditingIndex(null)}>
+        <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-5">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center">
@@ -637,8 +645,19 @@ export default function AnggaranPage() {
               </button>
             </div>
           </div>
-        </div>
-      )}
+      </ModalPortal>
+
+      {/* Modal Dialog Konfirmasi Hapus Pos Anggaran */}
+      <ConfirmDialog
+        isOpen={posToDeleteIndex !== null}
+        title="Hapus Pos Anggaran"
+        message={`Apakah Anda yakin ingin menghapus pos "${posToDeleteIndex !== null ? anggaranList[posToDeleteIndex]?.pos : ""}"? Pos ini akan dihilangkan dari alokasi anggaran bulanan.`}
+        confirmLabel="Ya, Hapus Pos"
+        cancelLabel="Batal"
+        variant="danger"
+        onConfirm={confirmRemovePos}
+        onCancel={() => setPosToDeleteIndex(null)}
+      />
     </div>
   );
 }

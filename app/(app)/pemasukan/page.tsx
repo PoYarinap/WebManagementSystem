@@ -22,6 +22,8 @@ import {
 } from "@/lib/format";
 import { Pemasukan } from "@/lib/types";
 import { PeriodSelector } from "@/components/PeriodSelector";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ModalPortal } from "@/components/ModalPortal";
 
 export default function PemasukanPage() {
   const [periode, setPeriode] = useState(getCurrentPeriodeJakarta());
@@ -41,6 +43,9 @@ export default function PemasukanPage() {
   const [editTanggal, setEditTanggal] = useState("");
   const [editJumlahStr, setEditJumlahStr] = useState("");
   const [editKeterangan, setEditKeterangan] = useState("");
+
+  // Delete confirm dialog state
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; keterangan: string } | null>(null);
 
   const fetchData = useCallback(async (selectedPeriod: string) => {
     try {
@@ -167,8 +172,14 @@ export default function PemasukanPage() {
     }
   };
 
-  const handleDelete = async (id: string, ket: string) => {
-    if (!confirm(`Hapus entri pemasukan "${ket}"?`)) return;
+  const handleDelete = (id: string, ket: string) => {
+    setDeleteConfirm({ id, keterangan: ket });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    const { id } = deleteConfirm;
+    setDeleteConfirm(null);
 
     try {
       const res = await fetch(`/api/pemasukan?id=${id}`, {
@@ -402,9 +413,8 @@ export default function PemasukanPage() {
       </div>
 
       {/* Edit Modal */}
-      {editingItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+      <ModalPortal isOpen={!!editingItem} onClose={() => setEditingItem(null)}>
+        <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
               <h3 className="font-bold text-base text-slate-900 dark:text-white">
                 Edit Pemasukan
@@ -473,8 +483,18 @@ export default function PemasukanPage() {
               </button>
             </div>
           </div>
-        </div>
-      )}
+      </ModalPortal>
+      {/* Modal Dialog Konfirmasi Hapus yang Elegan */}
+      <ConfirmDialog
+        isOpen={deleteConfirm !== null}
+        title="Hapus Entri Pemasukan"
+        message={`Apakah Anda yakin ingin menghapus pemasukan "${deleteConfirm?.keterangan || "ini"}"? Tindakan ini tidak dapat dibatalkan.`}
+        confirmLabel="Ya, Hapus Pemasukan"
+        cancelLabel="Batal"
+        variant="danger"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </div>
   );
 }

@@ -21,6 +21,8 @@ import {
 } from "@/lib/format";
 import { Anggaran, Pengeluaran } from "@/lib/types";
 import { PeriodSelector } from "@/components/PeriodSelector";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ModalPortal } from "@/components/ModalPortal";
 
 export default function TransaksiPage() {
   const [periode, setPeriode] = useState(getCurrentPeriodeJakarta());
@@ -40,6 +42,9 @@ export default function TransaksiPage() {
   const [editKeterangan, setEditKeterangan] = useState("");
   const [editJumlahStr, setEditJumlahStr] = useState("");
   const [submittingEdit, setSubmittingEdit] = useState(false);
+
+  // Delete confirm dialog state
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; keterangan: string } | null>(null);
 
   const fetchData = useCallback(async (selectedPeriod: string) => {
     try {
@@ -150,8 +155,14 @@ export default function TransaksiPage() {
     }
   };
 
-  const handleDelete = async (id: string, ket: string) => {
-    if (!confirm(`Hapus pengeluaran "${ket}"?`)) return;
+  const handleDelete = (id: string, ket: string) => {
+    setDeleteConfirm({ id, keterangan: ket });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    const { id } = deleteConfirm;
+    setDeleteConfirm(null);
 
     try {
       const res = await fetch(`/api/pengeluaran?id=${id}`, {
@@ -379,9 +390,8 @@ export default function TransaksiPage() {
       </div>
 
       {/* Edit Modal */}
-      {editingItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+      <ModalPortal isOpen={!!editingItem} onClose={() => setEditingItem(null)}>
+        <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
               <h3 className="font-bold text-base text-slate-900 dark:text-white">
                 Edit Transaksi Pengeluaran
@@ -470,8 +480,18 @@ export default function TransaksiPage() {
               </button>
             </div>
           </div>
-        </div>
-      )}
+      </ModalPortal>
+      {/* Modal Dialog Konfirmasi Hapus yang Elegan */}
+      <ConfirmDialog
+        isOpen={deleteConfirm !== null}
+        title="Hapus Transaksi Pengeluaran"
+        message={`Apakah Anda yakin ingin menghapus pengeluaran "${deleteConfirm?.keterangan || "ini"}"? Tindakan ini tidak dapat dibatalkan.`}
+        confirmLabel="Ya, Hapus Transaksi"
+        cancelLabel="Batal"
+        variant="danger"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </div>
   );
 }
