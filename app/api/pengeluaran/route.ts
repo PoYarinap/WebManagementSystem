@@ -6,14 +6,19 @@ import {
   deletePengeluaran,
 } from "@/lib/sheets";
 import { getCurrentPeriodeJakarta } from "@/lib/format";
+import { getSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "Sesi tidak valid." }, { status: 401 });
+    }
     const { searchParams } = new URL(request.url);
     const periode = searchParams.get("periode") || undefined;
-    const list = await getPengeluaranList(periode);
+    const list = await getPengeluaranList(periode, session.userId);
     return NextResponse.json({ data: list });
   } catch (error: any) {
     console.error("GET Pengeluaran error:", error);
@@ -26,6 +31,10 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "Sesi tidak valid." }, { status: 401 });
+    }
     const body = await request.json();
     const { tanggal, pos, keterangan, jumlah, periode } = body;
 
@@ -47,13 +56,16 @@ export async function POST(request: Request) {
     const calculatedPeriode =
       periode || (tanggal ? tanggal.substring(0, 7) : getCurrentPeriodeJakarta());
 
-    const result = await addPengeluaran({
-      tanggal: tanggal || new Date().toISOString().split("T")[0],
-      periode: calculatedPeriode,
-      pos: pos.trim(),
-      keterangan: keterangan?.trim() || "Pengeluaran",
-      jumlah: numJumlah,
-    });
+    const result = await addPengeluaran(
+      {
+        tanggal: tanggal || new Date().toISOString().split("T")[0],
+        periode: calculatedPeriode,
+        pos: pos.trim(),
+        keterangan: keterangan?.trim() || "Pengeluaran",
+        jumlah: numJumlah,
+      },
+      session.userId
+    );
 
     return NextResponse.json({ success: true, data: result });
   } catch (error: any) {
@@ -67,6 +79,10 @@ export async function POST(request: Request) {
 
 export async function PUT(request: Request) {
   try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "Sesi tidak valid." }, { status: 401 });
+    }
     const body = await request.json();
     const { id, tanggal, pos, keterangan, jumlah, periode } = body;
 
@@ -95,7 +111,7 @@ export async function PUT(request: Request) {
       updateData.jumlah = numJumlah;
     }
 
-    const success = await updatePengeluaran(id, updateData);
+    const success = await updatePengeluaran(id, updateData, session.userId);
     if (!success) {
       return NextResponse.json(
         { error: "Data pengeluaran tidak ditemukan untuk diperbarui." },
@@ -115,6 +131,10 @@ export async function PUT(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "Sesi tidak valid." }, { status: 401 });
+    }
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
@@ -125,7 +145,7 @@ export async function DELETE(request: Request) {
       );
     }
 
-    const success = await deletePengeluaran(id);
+    const success = await deletePengeluaran(id, session.userId);
     if (!success) {
       return NextResponse.json(
         { error: "Data pengeluaran tidak ditemukan untuk dihapus." },

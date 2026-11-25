@@ -1,5 +1,6 @@
 import { google, sheets_v4 } from "googleapis";
-import { Anggaran, Pemasukan, Pengeluaran, Pengaturan } from "./types";
+import { Anggaran, AppUser, Pemasukan, Pengeluaran, Pengaturan, UserRole } from "./types";
+import { hashPassword } from "./password";
 
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 
@@ -8,13 +9,15 @@ const SHEET_NAMES = {
   PENGELUARAN: "Pengeluaran",
   ANGGARAN: "Anggaran",
   PENGATURAN: "Pengaturan",
+  USERS: "Users",
 };
 
 const HEADERS = {
-  [SHEET_NAMES.PEMASUKAN]: ["id", "tanggal", "periode", "jumlah", "keterangan"],
-  [SHEET_NAMES.PENGELUARAN]: ["id", "tanggal", "periode", "pos", "keterangan", "jumlah", "dibuat_pada"],
-  [SHEET_NAMES.ANGGARAN]: ["pos", "jatah_bulanan", "jatah_harian_opsional"],
-  [SHEET_NAMES.PENGATURAN]: ["key", "value"],
+  [SHEET_NAMES.PEMASUKAN]: ["id", "tanggal", "periode", "jumlah", "keterangan", "user_id"],
+  [SHEET_NAMES.PENGELUARAN]: ["id", "tanggal", "periode", "pos", "keterangan", "jumlah", "dibuat_pada", "user_id"],
+  [SHEET_NAMES.ANGGARAN]: ["pos", "jatah_bulanan", "jatah_harian_opsional", "user_id"],
+  [SHEET_NAMES.PENGATURAN]: ["key", "value", "user_id"],
+  [SHEET_NAMES.USERS]: ["id", "username", "nama", "password_hash", "role", "aktif", "dibuat_pada"],
 };
 
 const INITIAL_ANGGARAN: Anggaran[] = [
@@ -60,8 +63,21 @@ export function invalidateCache(): void {
 // Fallback in-memory storage if Google Sheet credentials are not yet configured
 let mockPemasukan: Pemasukan[] = [];
 let mockPengeluaran: Pengeluaran[] = [];
-let mockAnggaran: Anggaran[] = [...INITIAL_ANGGARAN];
-let mockPengaturan: Record<string, any> = { ...INITIAL_PENGATURAN };
+let mockAnggaran: Anggaran[] = INITIAL_ANGGARAN.map((a) => ({ ...a, user_id: "admin" }));
+let mockPengaturan: Record<string, Record<string, any>> = {
+  admin: { ...INITIAL_PENGATURAN },
+};
+let mockUsers: AppUser[] = [
+  {
+    id: "admin",
+    username: "admin",
+    nama: "Admin Utama",
+    password_hash: hashPassword(process.env.ADMIN_PASSWORD || "admin123"),
+    role: "admin",
+    aktif: true,
+    dibuat_pada: new Date().toISOString(),
+  },
+];
 
 export function isGoogleSheetsConfigured(): boolean {
   return !!(
@@ -168,17 +184,18 @@ export async function ensureSpreadsheetInitialized(): Promise<void> {
       if (sheetTitle === SHEET_NAMES.ANGGARAN) {
         const rowsRes = await sheets.spreadsheets.values.get({
           spreadsheetId,
-          range: `${sheetTitle}!A2:C`,
+          range: `${sheetTitle}!A2:D`,
         });
         if (!rowsRes.data.values || rowsRes.data.values.length === 0) {
           const initialRows = INITIAL_ANGGARAN.map((a) => [
             a.pos,
             a.jatah_bulanan,
             a.jatah_harian_opsional || 0,
+            "admin",
           ]);
           await sheets.spreadsheets.values.append({
             spreadsheetId,
-            range: `${sheetTitle}!A2:C`,
+            range: `${sheetTitle}!A2:D`,
             valueInputOption: "USER_ENTERED",
             requestBody: { values: initialRows },
           });
@@ -189,17 +206,46 @@ export async function ensureSpreadsheetInitialized(): Promise<void> {
       if (sheetTitle === SHEET_NAMES.PENGATURAN) {
         const rowsRes = await sheets.spreadsheets.values.get({
           spreadsheetId,
-          range: `${sheetTitle}!A2:B`,
+          range: `${sheetTitle}!A2:C`,
         });
         if (!rowsRes.data.values || rowsRes.data.values.length === 0) {
           const initialRows = Object.entries(INITIAL_PENGATURAN).map(
-            ([key, val]) => [key, String(val)]
+            ([key, val]) => [key, String(val), "admin"]
           );
           await sheets.spreadsheets.values.append({
             spreadsheetId,
-            range: `${sheetTitle}!A2:B`,
+            range: `${sheetTitle}!A2:C`,
             valueInputOption: "USER_ENTERED",
             requestBody: { values: initialRows },
+          });
+        }
+      }
+
+      // Check if Users needs initial Admin seed
+      if (sheetTitle === SHEET_NAMES.USERS) {
+        const rowsRes = await sheets.spreadsheets.values.get({
+          spreadsheetId,
+          range: `${sheetTitle}!A2:G`,
+        });
+        if (!rowsRes.data.values || rowsRes.data.values.length === 0) {
+          const adminPassword = process.env.ADMIN_PASSWORD || "admin123";
+          await sheets.spreadsheets.values.append({
+            spreadsheetId,
+            range: `${sheetTitle}!A2:G`,
+            valueInputOption: "USER_ENTERED",
+            requestBody: {
+              values: [
+                [
+                  "admin",
+                  "admin",
+                  "Admin Utama",
+                  hashPassword(adminPassword),
+                  "admin",
+                  "true",
+                  new Date().toISOString(),
+                ],
+              ],
+            },
           });
         }
       }
@@ -216,9 +262,12 @@ export async function ensureSpreadsheetInitialized(): Promise<void> {
 // PEMASUKAN
 // ==========================================
 
-export async function getPemasukanList(periode?: string): Promise<Pemasukan[]> {
+export async function getPemasukanList(
+  periode?: string,
+  userId: string = "admin"
+): Promise<Pemasukan[]> {
   if (!isGoogleSheetsConfigured()) {
-    let list = [...mockPemasukan];
+    let list = mockPemasukan.filter((item) => (item.user_id || "admin") === userId);
     if (periode) {
       list = list.filter((item) => item.periode === periode);
     }
@@ -226,7 +275,7 @@ export async function getPemasukanList(periode?: string): Promise<Pemasukan[]> {
   }
 
   await ensureSpreadsheetInitialized();
-  const cacheKey = `pemasukan_${periode || "all"}`;
+  const cacheKey = `pemasukan_${userId}_${periode || "all"}`;
   const cached = getCached<Pemasukan[]>(cacheKey);
   if (cached) return cached;
 
@@ -234,17 +283,20 @@ export async function getPemasukanList(periode?: string): Promise<Pemasukan[]> {
   const spreadsheetId = getSpreadsheetId();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${SHEET_NAMES.PEMASUKAN}!A2:E`,
+    range: `${SHEET_NAMES.PEMASUKAN}!A2:F`,
   });
 
   const rows = res.data.values || [];
-  let list: Pemasukan[] = rows.map((row) => ({
-    id: String(row[0] || ""),
-    tanggal: String(row[1] || ""),
-    periode: String(row[2] || ""),
-    jumlah: parseInt(String(row[3] || "0").replace(/[^0-9]/g, ""), 10) || 0,
-    keterangan: String(row[4] || ""),
-  }));
+  let list: Pemasukan[] = rows
+    .map((row) => ({
+      id: String(row[0] || ""),
+      tanggal: String(row[1] || ""),
+      periode: String(row[2] || ""),
+      jumlah: parseInt(String(row[3] || "0").replace(/[^0-9]/g, ""), 10) || 0,
+      keterangan: String(row[4] || ""),
+      user_id: String(row[5] || "admin"),
+    }))
+    .filter((item) => item.user_id === userId);
 
   if (periode) {
     list = list.filter((item) => item.periode === periode);
@@ -255,10 +307,11 @@ export async function getPemasukanList(periode?: string): Promise<Pemasukan[]> {
 }
 
 export async function addPemasukan(
-  data: Omit<Pemasukan, "id">
+  data: Omit<Pemasukan, "id">,
+  userId: string = "admin"
 ): Promise<Pemasukan> {
   const id = crypto.randomUUID();
-  const newEntry: Pemasukan = { id, ...data };
+  const newEntry: Pemasukan = { id, ...data, user_id: userId };
 
   if (!isGoogleSheetsConfigured()) {
     mockPemasukan.push(newEntry);
@@ -271,7 +324,7 @@ export async function addPemasukan(
 
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: `${SHEET_NAMES.PEMASUKAN}!A:E`,
+    range: `${SHEET_NAMES.PEMASUKAN}!A:F`,
     valueInputOption: "USER_ENTERED",
     requestBody: {
       values: [
@@ -281,6 +334,7 @@ export async function addPemasukan(
           newEntry.periode,
           newEntry.jumlah,
           newEntry.keterangan,
+          userId,
         ],
       ],
     },
@@ -292,10 +346,13 @@ export async function addPemasukan(
 
 export async function updatePemasukan(
   id: string,
-  data: Partial<Pemasukan>
+  data: Partial<Pemasukan>,
+  userId: string = "admin"
 ): Promise<boolean> {
   if (!isGoogleSheetsConfigured()) {
-    const idx = mockPemasukan.findIndex((p) => p.id === id);
+    const idx = mockPemasukan.findIndex(
+      (p) => p.id === id && (p.user_id || "admin") === userId
+    );
     if (idx !== -1) {
       mockPemasukan[idx] = { ...mockPemasukan[idx], ...data };
       return true;
@@ -309,10 +366,12 @@ export async function updatePemasukan(
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${SHEET_NAMES.PEMASUKAN}!A2:E`,
+    range: `${SHEET_NAMES.PEMASUKAN}!A2:F`,
   });
   const rows = res.data.values || [];
-  const rowIndex = rows.findIndex((r) => r[0] === id);
+  const rowIndex = rows.findIndex(
+    (r) => r[0] === id && String(r[5] || "admin") === userId
+  );
   if (rowIndex === -1) return false;
 
   const actualRow = rowIndex + 2;
@@ -323,11 +382,12 @@ export async function updatePemasukan(
     data.periode ?? current[2],
     data.jumlah ?? current[3],
     data.keterangan ?? current[4],
+    userId,
   ];
 
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `${SHEET_NAMES.PEMASUKAN}!A${actualRow}:E${actualRow}`,
+    range: `${SHEET_NAMES.PEMASUKAN}!A${actualRow}:F${actualRow}`,
     valueInputOption: "USER_ENTERED",
     requestBody: { values: [updatedRow] },
   });
@@ -336,10 +396,15 @@ export async function updatePemasukan(
   return true;
 }
 
-export async function deletePemasukan(id: string): Promise<boolean> {
+export async function deletePemasukan(
+  id: string,
+  userId: string = "admin"
+): Promise<boolean> {
   if (!isGoogleSheetsConfigured()) {
     const initialLen = mockPemasukan.length;
-    mockPemasukan = mockPemasukan.filter((p) => p.id !== id);
+    mockPemasukan = mockPemasukan.filter(
+      (p) => !(p.id === id && (p.user_id || "admin") === userId)
+    );
     return mockPemasukan.length < initialLen;
   }
 
@@ -356,10 +421,12 @@ export async function deletePemasukan(id: string): Promise<boolean> {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${SHEET_NAMES.PEMASUKAN}!A2:A`,
+    range: `${SHEET_NAMES.PEMASUKAN}!A2:F`,
   });
   const rows = res.data.values || [];
-  const rowIndex = rows.findIndex((r) => r[0] === id);
+  const rowIndex = rows.findIndex(
+    (r) => r[0] === id && String(r[5] || "admin") === userId
+  );
   if (rowIndex === -1) return false;
 
   const actualRowZeroIndex = rowIndex + 1; // 0-based index for deleteDimension
@@ -391,10 +458,11 @@ export async function deletePemasukan(id: string): Promise<boolean> {
 // ==========================================
 
 export async function getPengeluaranList(
-  periode?: string
+  periode?: string,
+  userId: string = "admin"
 ): Promise<Pengeluaran[]> {
   if (!isGoogleSheetsConfigured()) {
-    let list = [...mockPengeluaran];
+    let list = mockPengeluaran.filter((item) => (item.user_id || "admin") === userId);
     if (periode) {
       list = list.filter((item) => item.periode === periode);
     }
@@ -402,7 +470,7 @@ export async function getPengeluaranList(
   }
 
   await ensureSpreadsheetInitialized();
-  const cacheKey = `pengeluaran_${periode || "all"}`;
+  const cacheKey = `pengeluaran_${userId}_${periode || "all"}`;
   const cached = getCached<Pengeluaran[]>(cacheKey);
   if (cached) return cached;
 
@@ -410,19 +478,22 @@ export async function getPengeluaranList(
   const spreadsheetId = getSpreadsheetId();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${SHEET_NAMES.PENGELUARAN}!A2:G`,
+    range: `${SHEET_NAMES.PENGELUARAN}!A2:H`,
   });
 
   const rows = res.data.values || [];
-  let list: Pengeluaran[] = rows.map((row) => ({
-    id: String(row[0] || ""),
-    tanggal: String(row[1] || ""),
-    periode: String(row[2] || ""),
-    pos: String(row[3] || ""),
-    keterangan: String(row[4] || ""),
-    jumlah: parseInt(String(row[5] || "0").replace(/[^0-9]/g, ""), 10) || 0,
-    dibuat_pada: String(row[6] || ""),
-  }));
+  let list: Pengeluaran[] = rows
+    .map((row) => ({
+      id: String(row[0] || ""),
+      tanggal: String(row[1] || ""),
+      periode: String(row[2] || ""),
+      pos: String(row[3] || ""),
+      keterangan: String(row[4] || ""),
+      jumlah: parseInt(String(row[5] || "0").replace(/[^0-9]/g, ""), 10) || 0,
+      dibuat_pada: String(row[6] || ""),
+      user_id: String(row[7] || "admin"),
+    }))
+    .filter((item) => item.user_id === userId);
 
   if (periode) {
     list = list.filter((item) => item.periode === periode);
@@ -433,11 +504,12 @@ export async function getPengeluaranList(
 }
 
 export async function addPengeluaran(
-  data: Omit<Pengeluaran, "id" | "dibuat_pada">
+  data: Omit<Pengeluaran, "id" | "dibuat_pada">,
+  userId: string = "admin"
 ): Promise<Pengeluaran> {
   const id = crypto.randomUUID();
   const dibuat_pada = new Date().toISOString();
-  const newEntry: Pengeluaran = { id, dibuat_pada, ...data };
+  const newEntry: Pengeluaran = { id, dibuat_pada, ...data, user_id: userId };
 
   if (!isGoogleSheetsConfigured()) {
     mockPengeluaran.push(newEntry);
@@ -450,7 +522,7 @@ export async function addPengeluaran(
 
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: `${SHEET_NAMES.PENGELUARAN}!A:G`,
+    range: `${SHEET_NAMES.PENGELUARAN}!A:H`,
     valueInputOption: "USER_ENTERED",
     requestBody: {
       values: [
@@ -462,6 +534,7 @@ export async function addPengeluaran(
           newEntry.keterangan,
           newEntry.jumlah,
           newEntry.dibuat_pada,
+          userId,
         ],
       ],
     },
@@ -473,10 +546,13 @@ export async function addPengeluaran(
 
 export async function updatePengeluaran(
   id: string,
-  data: Partial<Pengeluaran>
+  data: Partial<Pengeluaran>,
+  userId: string = "admin"
 ): Promise<boolean> {
   if (!isGoogleSheetsConfigured()) {
-    const idx = mockPengeluaran.findIndex((p) => p.id === id);
+    const idx = mockPengeluaran.findIndex(
+      (p) => p.id === id && (p.user_id || "admin") === userId
+    );
     if (idx !== -1) {
       mockPengeluaran[idx] = { ...mockPengeluaran[idx], ...data };
       return true;
@@ -490,10 +566,12 @@ export async function updatePengeluaran(
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${SHEET_NAMES.PENGELUARAN}!A2:G`,
+    range: `${SHEET_NAMES.PENGELUARAN}!A2:H`,
   });
   const rows = res.data.values || [];
-  const rowIndex = rows.findIndex((r) => r[0] === id);
+  const rowIndex = rows.findIndex(
+    (r) => r[0] === id && String(r[7] || "admin") === userId
+  );
   if (rowIndex === -1) return false;
 
   const actualRow = rowIndex + 2;
@@ -506,11 +584,12 @@ export async function updatePengeluaran(
     data.keterangan ?? current[4],
     data.jumlah ?? current[5],
     current[6], // keep original dibuat_pada
+    userId,
   ];
 
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `${SHEET_NAMES.PENGELUARAN}!A${actualRow}:G${actualRow}`,
+    range: `${SHEET_NAMES.PENGELUARAN}!A${actualRow}:H${actualRow}`,
     valueInputOption: "USER_ENTERED",
     requestBody: { values: [updatedRow] },
   });
@@ -519,10 +598,15 @@ export async function updatePengeluaran(
   return true;
 }
 
-export async function deletePengeluaran(id: string): Promise<boolean> {
+export async function deletePengeluaran(
+  id: string,
+  userId: string = "admin"
+): Promise<boolean> {
   if (!isGoogleSheetsConfigured()) {
     const initialLen = mockPengeluaran.length;
-    mockPengeluaran = mockPengeluaran.filter((p) => p.id !== id);
+    mockPengeluaran = mockPengeluaran.filter(
+      (p) => !(p.id === id && (p.user_id || "admin") === userId)
+    );
     return mockPengeluaran.length < initialLen;
   }
 
@@ -539,10 +623,12 @@ export async function deletePengeluaran(id: string): Promise<boolean> {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${SHEET_NAMES.PENGELUARAN}!A2:A`,
+    range: `${SHEET_NAMES.PENGELUARAN}!A2:H`,
   });
   const rows = res.data.values || [];
-  const rowIndex = rows.findIndex((r) => r[0] === id);
+  const rowIndex = rows.findIndex(
+    (r) => r[0] === id && String(r[7] || "admin") === userId
+  );
   if (rowIndex === -1) return false;
 
   const actualRowZeroIndex = rowIndex + 1;
@@ -573,13 +659,14 @@ export async function deletePengeluaran(id: string): Promise<boolean> {
 // ANGGARAN
 // ==========================================
 
-export async function getAnggaranList(): Promise<Anggaran[]> {
+export async function getAnggaranList(userId: string = "admin"): Promise<Anggaran[]> {
   if (!isGoogleSheetsConfigured()) {
-    return [...mockAnggaran];
+    const userRows = mockAnggaran.filter((a) => (a.user_id || "admin") === userId);
+    return userRows.length > 0 ? userRows : INITIAL_ANGGARAN.map((a) => ({ ...a, user_id: userId }));
   }
 
   await ensureSpreadsheetInitialized();
-  const cacheKey = "anggaran_list";
+  const cacheKey = `anggaran_list_${userId}`;
   const cached = getCached<Anggaran[]>(cacheKey);
   if (cached) return cached;
 
@@ -587,25 +674,39 @@ export async function getAnggaranList(): Promise<Anggaran[]> {
   const spreadsheetId = getSpreadsheetId();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${SHEET_NAMES.ANGGARAN}!A2:C`,
+    range: `${SHEET_NAMES.ANGGARAN}!A2:D`,
   });
 
   const rows = res.data.values || [];
-  const list: Anggaran[] = rows.map((row) => ({
-    pos: String(row[0] || ""),
-    jatah_bulanan:
-      parseInt(String(row[1] || "0").replace(/[^0-9]/g, ""), 10) || 0,
-    jatah_harian_opsional:
-      parseInt(String(row[2] || "0").replace(/[^0-9]/g, ""), 10) || 0,
-  }));
+  const list: Anggaran[] = rows
+    .filter((row) => String(row[3] || "admin") === userId)
+    .map((row) => ({
+      pos: String(row[0] || ""),
+      jatah_bulanan:
+        parseInt(String(row[1] || "0").replace(/[^0-9]/g, ""), 10) || 0,
+      jatah_harian_opsional:
+        parseInt(String(row[2] || "0").replace(/[^0-9]/g, ""), 10) || 0,
+      user_id: userId,
+    }));
 
-  setCached(cacheKey, list);
-  return list;
+  const finalList =
+    list.length > 0
+      ? list
+      : INITIAL_ANGGARAN.map((a) => ({ ...a, user_id: userId }));
+
+  setCached(cacheKey, finalList);
+  return finalList;
 }
 
-export async function saveAnggaranList(list: Anggaran[]): Promise<boolean> {
+export async function saveAnggaranList(
+  list: Anggaran[],
+  userId: string = "admin"
+): Promise<boolean> {
   if (!isGoogleSheetsConfigured()) {
-    mockAnggaran = [...list];
+    mockAnggaran = [
+      ...mockAnggaran.filter((a) => (a.user_id || "admin") !== userId),
+      ...list.map((a) => ({ ...a, user_id: userId })),
+    ];
     return true;
   }
 
@@ -613,23 +714,37 @@ export async function saveAnggaranList(list: Anggaran[]): Promise<boolean> {
   const sheets = getSheets();
   const spreadsheetId = getSpreadsheetId();
 
+  // Read all rows and preserve other users' budgets
+  const existingRes = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${SHEET_NAMES.ANGGARAN}!A2:D`,
+  });
+  const existingRows = existingRes.data.values || [];
+  const otherUsersRows = existingRows
+    .filter((row) => String(row[3] || "admin") !== userId)
+    .map((row) => [row[0] || "", row[1] || 0, row[2] || 0, row[3] || "admin"]);
+
+  const newUserRows = list.map((a) => [
+    a.pos,
+    a.jatah_bulanan,
+    a.jatah_harian_opsional || 0,
+    userId,
+  ]);
+
+  const combinedRows = [...otherUsersRows, ...newUserRows];
+
   // Clear existing rows in Anggaran
   await sheets.spreadsheets.values.clear({
     spreadsheetId,
-    range: `${SHEET_NAMES.ANGGARAN}!A2:C`,
+    range: `${SHEET_NAMES.ANGGARAN}!A2:D`,
   });
 
-  if (list.length > 0) {
-    const rows = list.map((a) => [
-      a.pos,
-      a.jatah_bulanan,
-      a.jatah_harian_opsional || 0,
-    ]);
+  if (combinedRows.length > 0) {
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `${SHEET_NAMES.ANGGARAN}!A2:C${rows.length + 1}`,
+      range: `${SHEET_NAMES.ANGGARAN}!A2:D${combinedRows.length + 1}`,
       valueInputOption: "USER_ENTERED",
-      requestBody: { values: rows },
+      requestBody: { values: combinedRows },
     });
   }
 
@@ -641,13 +756,13 @@ export async function saveAnggaranList(list: Anggaran[]): Promise<boolean> {
 // PENGATURAN
 // ==========================================
 
-export async function getPengaturan(): Promise<Pengaturan> {
+export async function getPengaturan(userId: string = "admin"): Promise<Pengaturan> {
   if (!isGoogleSheetsConfigured()) {
-    return { ...mockPengaturan };
+    return { ...INITIAL_PENGATURAN, ...(mockPengaturan[userId] || {}) };
   }
 
   await ensureSpreadsheetInitialized();
-  const cacheKey = "pengaturan";
+  const cacheKey = `pengaturan_${userId}`;
   const cached = getCached<Pengaturan>(cacheKey);
   if (cached) return cached;
 
@@ -655,12 +770,13 @@ export async function getPengaturan(): Promise<Pengaturan> {
   const spreadsheetId = getSpreadsheetId();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${SHEET_NAMES.PENGATURAN}!A2:B`,
+    range: `${SHEET_NAMES.PENGATURAN}!A2:C`,
   });
 
   const rows = res.data.values || [];
   const result: Record<string, any> = { ...INITIAL_PENGATURAN };
   for (const row of rows) {
+    if (String(row[2] || "admin") !== userId) continue;
     const key = String(row[0] || "");
     const val = String(row[1] || "");
     if (key) {
@@ -675,10 +791,11 @@ export async function getPengaturan(): Promise<Pengaturan> {
 
 export async function updatePengaturanItem(
   key: string,
-  value: any
+  value: any,
+  userId: string = "admin"
 ): Promise<boolean> {
   if (!isGoogleSheetsConfigured()) {
-    mockPengaturan[key] = value;
+    mockPengaturan[userId] = { ...(mockPengaturan[userId] || {}), [key]: value };
     return true;
   }
 
@@ -688,26 +805,296 @@ export async function updatePengaturanItem(
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${SHEET_NAMES.PENGATURAN}!A2:B`,
+    range: `${SHEET_NAMES.PENGATURAN}!A2:C`,
   });
   const rows = res.data.values || [];
-  const rowIndex = rows.findIndex((r) => r[0] === key);
+  const rowIndex = rows.findIndex(
+    (r) => r[0] === key && String(r[2] || "admin") === userId
+  );
 
   if (rowIndex !== -1) {
     const actualRow = rowIndex + 2;
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `${SHEET_NAMES.PENGATURAN}!B${actualRow}`,
+      range: `${SHEET_NAMES.PENGATURAN}!B${actualRow}:C${actualRow}`,
       valueInputOption: "USER_ENTERED",
-      requestBody: { values: [[String(value)]] },
+      requestBody: { values: [[String(value), userId]] },
     });
   } else {
     await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: `${SHEET_NAMES.PENGATURAN}!A:B`,
+      range: `${SHEET_NAMES.PENGATURAN}!A:C`,
       valueInputOption: "USER_ENTERED",
-      requestBody: { values: [[key, String(value)]] },
+      requestBody: { values: [[key, String(value), userId]] },
     });
+  }
+
+  invalidateCache();
+  return true;
+}
+
+// ==========================================
+// USERS (MULTI-USER MANAGEMENT)
+// ==========================================
+
+export async function getUsersList(): Promise<AppUser[]> {
+  if (!isGoogleSheetsConfigured()) {
+    return [...mockUsers];
+  }
+
+  await ensureSpreadsheetInitialized();
+  const cacheKey = "users_list";
+  const cached = getCached<AppUser[]>(cacheKey);
+  if (cached) return cached;
+
+  const sheets = getSheets();
+  const spreadsheetId = getSpreadsheetId();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${SHEET_NAMES.USERS}!A2:G`,
+  });
+
+  const rows = res.data.values || [];
+  const list: AppUser[] = rows
+    .filter((row) => row[0] && row[1])
+    .map((row) => ({
+      id: String(row[0]),
+      username: String(row[1]),
+      nama: String(row[2] || row[1]),
+      password_hash: String(row[3] || ""),
+      role: (String(row[4]) === "admin" ? "admin" : "user") as UserRole,
+      aktif: String(row[5]).toLowerCase() !== "false",
+      dibuat_pada: String(row[6] || ""),
+    }));
+
+  setCached(cacheKey, list);
+  return list;
+}
+
+export async function getUserByUsername(username: string): Promise<AppUser | null> {
+  const users = await getUsersList();
+  const target = username.trim().toLowerCase();
+  return users.find((u) => u.username.toLowerCase() === target) || null;
+}
+
+export async function getUserById(id: string): Promise<AppUser | null> {
+  const users = await getUsersList();
+  return users.find((u) => u.id === id) || null;
+}
+
+export async function createUser(input: {
+  username: string;
+  nama: string;
+  password: string;
+  role?: UserRole;
+}): Promise<AppUser> {
+  const cleanUsername = input.username.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "");
+  if (!cleanUsername || cleanUsername.length < 3) {
+    throw new Error("Username minimal 3 karakter (huruf, angka, titik, atau garis bawah).");
+  }
+
+  const existing = await getUserByUsername(cleanUsername);
+  if (existing) {
+    throw new Error(`Username "${cleanUsername}" sudah digunakan.`);
+  }
+
+  const newUser: AppUser = {
+    id: crypto.randomUUID(),
+    username: cleanUsername,
+    nama: input.nama.trim() || cleanUsername,
+    password_hash: hashPassword(input.password),
+    role: input.role || "user",
+    aktif: true,
+    dibuat_pada: new Date().toISOString(),
+  };
+
+  if (!isGoogleSheetsConfigured()) {
+    mockUsers.push(newUser);
+    await saveAnggaranList(INITIAL_ANGGARAN, newUser.id);
+    return newUser;
+  }
+
+  await ensureSpreadsheetInitialized();
+  const sheets = getSheets();
+  const spreadsheetId = getSpreadsheetId();
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: `${SHEET_NAMES.USERS}!A:G`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: [
+        [
+          newUser.id,
+          newUser.username,
+          newUser.nama,
+          newUser.password_hash,
+          newUser.role,
+          "true",
+          newUser.dibuat_pada,
+        ],
+      ],
+    },
+  });
+
+  invalidateCache();
+
+  // Seed default budget for the new user so their dashboard works immediately
+  await saveAnggaranList(INITIAL_ANGGARAN, newUser.id);
+
+  return newUser;
+}
+
+export async function updateUser(
+  id: string,
+  data: { nama?: string; password?: string; aktif?: boolean }
+): Promise<boolean> {
+  if (!isGoogleSheetsConfigured()) {
+    const idx = mockUsers.findIndex((u) => u.id === id);
+    if (idx === -1) return false;
+    mockUsers[idx] = {
+      ...mockUsers[idx],
+      ...(data.nama !== undefined ? { nama: data.nama.trim() } : {}),
+      ...(data.password ? { password_hash: hashPassword(data.password) } : {}),
+      ...(data.aktif !== undefined && id !== "admin" ? { aktif: data.aktif } : {}),
+    };
+    return true;
+  }
+
+  await ensureSpreadsheetInitialized();
+  const sheets = getSheets();
+  const spreadsheetId = getSpreadsheetId();
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${SHEET_NAMES.USERS}!A2:G`,
+  });
+  const rows = res.data.values || [];
+  const rowIndex = rows.findIndex((r) => r[0] === id);
+  if (rowIndex === -1) return false;
+
+  const actualRow = rowIndex + 2;
+  const current = rows[rowIndex];
+  const updatedRow = [
+    id,
+    current[1],
+    data.nama !== undefined ? data.nama.trim() : current[2],
+    data.password ? hashPassword(data.password) : current[3],
+    current[4],
+    data.aktif !== undefined && id !== "admin" ? String(data.aktif) : current[5],
+    current[6] || "",
+  ];
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `${SHEET_NAMES.USERS}!A${actualRow}:G${actualRow}`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: [updatedRow] },
+  });
+
+  invalidateCache();
+  return true;
+}
+
+async function purgeUserRowsFromSheet(
+  sheets: sheets_v4.Sheets,
+  spreadsheetId: string,
+  sheetName: string,
+  rangeColEnd: string,
+  userIdColIndex: number,
+  targetUserId: string
+) {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${sheetName}!A2:${rangeColEnd}`,
+  });
+  const rows = res.data.values || [];
+  const keptRows = rows.filter(
+    (row) => String(row[userIdColIndex] || "admin") !== targetUserId
+  );
+
+  if (keptRows.length === rows.length) return;
+
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId,
+    range: `${sheetName}!A2:${rangeColEnd}`,
+  });
+
+  if (keptRows.length > 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${sheetName}!A2:${rangeColEnd}${keptRows.length + 1}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: keptRows },
+    });
+  }
+}
+
+export async function deleteUser(
+  id: string,
+  deleteData: boolean = true
+): Promise<boolean> {
+  if (id === "admin") {
+    throw new Error("Akun Admin Utama tidak dapat dihapus.");
+  }
+
+  if (!isGoogleSheetsConfigured()) {
+    const before = mockUsers.length;
+    mockUsers = mockUsers.filter((u) => u.id !== id);
+    if (deleteData) {
+      mockPemasukan = mockPemasukan.filter((p) => (p.user_id || "admin") !== id);
+      mockPengeluaran = mockPengeluaran.filter((p) => (p.user_id || "admin") !== id);
+      mockAnggaran = mockAnggaran.filter((a) => (a.user_id || "admin") !== id);
+      delete mockPengaturan[id];
+    }
+    return mockUsers.length < before;
+  }
+
+  await ensureSpreadsheetInitialized();
+  const sheets = getSheets();
+  const spreadsheetId = getSpreadsheetId();
+
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const userSheet = meta.data.sheets?.find(
+    (s) => s.properties?.title === SHEET_NAMES.USERS
+  );
+  const sheetId = userSheet?.properties?.sheetId;
+  if (sheetId === undefined) return false;
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${SHEET_NAMES.USERS}!A2:A`,
+  });
+  const rows = res.data.values || [];
+  const rowIndex = rows.findIndex((r) => r[0] === id);
+  if (rowIndex === -1) return false;
+
+  const actualRowZeroIndex = rowIndex + 1;
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          deleteDimension: {
+            range: {
+              sheetId,
+              dimension: "ROWS",
+              startIndex: actualRowZeroIndex,
+              endIndex: actualRowZeroIndex + 1,
+            },
+          },
+        },
+      ],
+    },
+  });
+
+  if (deleteData) {
+    await Promise.all([
+      purgeUserRowsFromSheet(sheets, spreadsheetId, SHEET_NAMES.PEMASUKAN, "F", 5, id),
+      purgeUserRowsFromSheet(sheets, spreadsheetId, SHEET_NAMES.PENGELUARAN, "H", 7, id),
+      purgeUserRowsFromSheet(sheets, spreadsheetId, SHEET_NAMES.ANGGARAN, "D", 3, id),
+      purgeUserRowsFromSheet(sheets, spreadsheetId, SHEET_NAMES.PENGATURAN, "C", 2, id),
+    ]);
   }
 
   invalidateCache();
@@ -718,14 +1105,17 @@ export async function updatePengaturanItem(
 // BATCH / AGGREGATION HELPERS
 // ==========================================
 
-export async function getDashboardDataForPeriode(periode: string) {
+export async function getDashboardDataForPeriode(
+  periode: string,
+  userId: string = "admin"
+) {
   // Batch get all needed data for this period
   const [allPemasukan, allPengeluaran, anggaranList, pengaturan] =
     await Promise.all([
-      getPemasukanList(),
-      getPengeluaranList(),
-      getAnggaranList(),
-      getPengaturan(),
+      getPemasukanList(undefined, userId),
+      getPengeluaranList(undefined, userId),
+      getAnggaranList(userId),
+      getPengaturan(userId),
     ]);
 
   const pemasukanPeriode = allPemasukan.filter((p) => p.periode === periode);
@@ -766,10 +1156,12 @@ export async function getDashboardDataForPeriode(periode: string) {
   };
 }
 
-export async function getAllDistinctPeriods(): Promise<string[]> {
+export async function getAllDistinctPeriods(
+  userId: string = "admin"
+): Promise<string[]> {
   const [pemasukanList, pengeluaranList] = await Promise.all([
-    getPemasukanList(),
-    getPengeluaranList(),
+    getPemasukanList(undefined, userId),
+    getPengeluaranList(undefined, userId),
   ]);
 
   const periodsSet = new Set<string>();

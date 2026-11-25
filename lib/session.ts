@@ -11,7 +11,10 @@ function getSecretKey(): Uint8Array {
 }
 
 export interface SessionPayload {
-  role: "admin";
+  userId: string;
+  username: string;
+  nama: string;
+  role: "admin" | "user";
   authenticated: boolean;
   exp?: number;
 }
@@ -41,7 +44,17 @@ export async function getSession(): Promise<SessionPayload | null> {
   const cookieStore = cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value;
   if (!token) return null;
-  return verifySession(token);
+  const payload = await verifySession(token);
+  if (!payload) return null;
+  // Backward compatibility for legacy admin tokens without userId
+  return {
+    userId: payload.userId || "admin",
+    username: payload.username || "admin",
+    nama: payload.nama || "Admin Utama",
+    role: payload.role || "admin",
+    authenticated: true,
+    exp: payload.exp,
+  };
 }
 
 export function setSessionCookie(responseHeaders: Headers, token: string) {

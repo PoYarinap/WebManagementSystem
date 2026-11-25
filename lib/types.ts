@@ -1,9 +1,31 @@
+export type UserRole = "admin" | "user";
+
+export interface AppUser {
+  id: string;
+  username: string;
+  nama: string;
+  password_hash: string;
+  role: UserRole;
+  aktif: boolean;
+  dibuat_pada: string;
+}
+
+export interface PublicUser {
+  id: string;
+  username: string;
+  nama: string;
+  role: UserRole;
+  aktif: boolean;
+  dibuat_pada: string;
+}
+
 export interface Pemasukan {
   id: string;
   tanggal: string; // YYYY-MM-DD
   periode: string; // YYYY-MM
   jumlah: number;
   keterangan: string;
+  user_id?: string;
 }
 
 export interface Pengeluaran {
@@ -14,12 +36,14 @@ export interface Pengeluaran {
   keterangan: string;
   jumlah: number;
   dibuat_pada: string; // ISO timestamp
+  user_id?: string;
 }
 
 export interface Anggaran {
   pos: string;
   jatah_bulanan: number;
   jatah_harian_opsional?: number;
+  user_id?: string;
 }
 
 export interface Pengaturan {

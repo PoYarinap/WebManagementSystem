@@ -6,14 +6,19 @@ import {
   updatePengaturanItem,
 } from "@/lib/sheets";
 import { Anggaran } from "@/lib/types";
+import { getSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "Sesi tidak valid." }, { status: 401 });
+    }
     const [anggaranList, pengaturan] = await Promise.all([
-      getAnggaranList(),
-      getPengaturan(),
+      getAnggaranList(session.userId),
+      getPengaturan(session.userId),
     ]);
 
     return NextResponse.json({
@@ -31,6 +36,10 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "Sesi tidak valid." }, { status: 401 });
+    }
     const body = await request.json();
     const { anggaran, gaji_default, tanggal_gajian } = body;
 
@@ -47,15 +56,15 @@ export async function POST(request: Request) {
           ),
         }));
 
-      await saveAnggaranList(cleanedList);
+      await saveAnggaranList(cleanedList, session.userId);
     }
 
     if (gaji_default !== undefined) {
-      await updatePengaturanItem("gaji_default", Number(gaji_default));
+      await updatePengaturanItem("gaji_default", Number(gaji_default), session.userId);
     }
 
     if (tanggal_gajian !== undefined) {
-      await updatePengaturanItem("tanggal_gajian", Number(tanggal_gajian));
+      await updatePengaturanItem("tanggal_gajian", Number(tanggal_gajian), session.userId);
     }
 
     return NextResponse.json({ success: true, message: "Anggaran berhasil disimpan." });

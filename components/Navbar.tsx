@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -9,6 +9,7 @@ import {
   ArrowDownLeft,
   PieChart,
   History,
+  Users,
   LogOut,
   Wallet,
   Menu,
@@ -32,6 +33,27 @@ export function Navbar() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [currentUser, setCurrentUser] = useState<{
+    nama: string;
+    username: string;
+    role: "admin" | "user";
+  } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (json?.authenticated && json?.user) {
+          setCurrentUser(json.user);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const navItems =
+    currentUser?.role === "admin"
+      ? [...NAV_ITEMS, { label: "Kelola Akun", href: "/akun", icon: Users }]
+      : NAV_ITEMS;
 
   const handleLogout = () => {
     setShowLogoutConfirm(true);
@@ -69,15 +91,15 @@ export function Navbar() {
             <h1 className="font-bold text-base text-slate-900 dark:text-white leading-tight">
               Rencana Gaji
             </h1>
-            <span className="text-xs text-slate-400 font-medium">
-              Keuangan Pribadi
+            <span className="text-xs text-slate-400 font-medium block truncate max-w-[140px]">
+              {currentUser ? `${currentUser.nama} (@${currentUser.username})` : "Keuangan Pribadi"}
             </span>
           </div>
         </div>
 
         {/* Navigation Links */}
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const Icon = item.icon;
             const isActive =
               item.href === "/"
@@ -151,7 +173,7 @@ export function Navbar() {
       {/* Mobile Menu Dropdown */}
       {mobileMenuOpen && (
         <div className="md:hidden fixed inset-x-0 top-14 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 z-30 p-4 shadow-xl space-y-1 animate-in slide-in-from-top duration-200">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const Icon = item.icon;
             const isActive =
               item.href === "/"

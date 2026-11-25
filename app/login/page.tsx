@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import {
     Wallet,
     Lock,
+    User,
     Eye,
     EyeOff,
     ArrowRight,
@@ -14,6 +15,7 @@ import {
 import { ThemeToggle } from '@/components/ThemeToggle'
 
 function LoginForm() {
+    const [username, setUsername] = useState('admin')
     const [password, setPassword] = useState('')
     const [showPassword, setShowPassword] = useState(false)
     const [loading, setLoading] = useState(false)
@@ -25,8 +27,8 @@ function LoginForm() {
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (!password) {
-            setError('Masukkan password admin terlebih dahulu.')
+        if (!username.trim() || !password) {
+            setError('Masukkan username dan password terlebih dahulu.')
             return
         }
 
@@ -37,20 +39,20 @@ function LoginForm() {
             const res = await fetch('/api/auth', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password }),
+                body: JSON.stringify({ username: username.trim(), password }),
             })
 
             const data = await res.json()
 
             if (!res.ok) {
-                throw new Error(data.error || 'Password salah, coba lagi.')
+                throw new Error(data.error || 'Username atau password salah, coba lagi.')
             }
 
             router.push(redirect)
             router.refresh()
         } catch (err: any) {
             setError(
-                err.message || 'Gagal masuk. Periksa password dan konfigurasi.'
+                err.message || 'Gagal masuk. Periksa username, password, dan konfigurasi.'
             )
         } finally {
             setLoading(false)
@@ -61,7 +63,7 @@ function LoginForm() {
         <div className="bg-white dark:bg-slate-900/90 backdrop-blur-md rounded-3xl p-6 sm:p-8 shadow-xl shadow-slate-200/50 dark:shadow-black/40 border border-slate-200/80 dark:border-slate-800">
             <div className="flex items-center gap-2 mb-6 text-slate-700 dark:text-slate-300">
                 <ShieldCheck className="w-5 h-5 text-blue-500" />
-                <h2 className="text-base font-semibold">Masuk Akun Admin</h2>
+                <h2 className="text-base font-semibold">Masuk ke Akun Anda</h2>
             </div>
 
             {error && (
@@ -75,10 +77,34 @@ function LoginForm() {
             <form onSubmit={handleLogin} className="space-y-4">
                 <div>
                     <label
+                        htmlFor="username"
+                        className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider"
+                    >
+                        Username
+                    </label>
+                    <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 dark:text-slate-500">
+                            <User className="w-4 h-4" />
+                        </div>
+                        <input
+                            id="username"
+                            type="text"
+                            value={username}
+                            onChange={(e) => setUsername(e.target.value)}
+                            placeholder="Contoh: admin atau nama akun..."
+                            autoComplete="username"
+                            required
+                            className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-2xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
+                        />
+                    </div>
+                </div>
+
+                <div>
+                    <label
                         htmlFor="password"
                         className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider"
                     >
-                        Password Admin
+                        Password
                     </label>
                     <div className="relative">
                         <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 dark:text-slate-500">
@@ -89,7 +115,7 @@ function LoginForm() {
                             type={showPassword ? 'text' : 'password'}
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
-                            placeholder="Masukkan password admin..."
+                            placeholder="Masukkan password..."
                             autoFocus
                             required
                             className="w-full pl-10 pr-11 py-3 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-2xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"

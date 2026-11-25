@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { signSession, clearSessionCookie, getSession } from "@/lib/session";
+import { getUserByUsername } from "@/lib/sheets";
+import { verifyPassword } from "@/lib/password";
 
 export const dynamic = "force-dynamic";
 
@@ -8,41 +10,84 @@ export async function GET() {
   if (!session) {
     return NextResponse.json({ authenticated: false }, { status: 401 });
   }
-  return NextResponse.json({ authenticated: true, role: session.role });
+  return NextResponse.json({
+    authenticated: true,
+    user: {
+      userId: session.userId,
+      username: session.username,
+      nama: session.nama,
+      role: session.role,
+    },
+  });
 }
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { action, password } = body;
+    const { action, username, password } = body;
 
     if (action === "logout") {
-      const response = NextResponse.json({ success: true, message: "Berhasil logout." });
+      const response = NextResponse.json({
+        success: true,
+        message: "Berhasil logout.",
+      });
       clearSessionCookie(response.headers);
       return response;
     }
 
-    // Default action is login
-    const adminPassword = process.env.ADMIN_PASSWORD;
-
-    if (!adminPassword) {
+    const targetUsername = (username || "admin").trim().toLowerCase();
+    if (!password) {
       return NextResponse.json(
-        { error: "ADMIN_PASSWORD belum dikonfigurasi di environment variable server." },
-        { status: 500 }
+        { error: "Password wajib diisi." },
+        { status: 400 }
       );
     }
 
-    if (!password || password !== adminPassword) {
+    const user = await getUserByUsername(targetUsername);
+    if (!user) {
       return NextResponse.json(
-        { error: "Password admin salah. Silakan coba lagi." },
+        { error: "Username atau password salah. Silakan coba lagi." },
         { status: 401 }
       );
     }
 
-    const token = await signSession({ role: "admin", authenticated: true });
+    if (!user.aktif) {
+      return NextResponse.json(
+        { error: "Akun Anda sedang dinonaktifkan oleh Admin." },
+        { status: 403 }
+      );
+    }
+
+    const isPasswordMatch =
+      verifyPassword(password, user.password_hash) ||
+      (user.id === "admin" &&
+        !!process.env.ADMIN_PASSWORD &&
+        password === process.env.ADMIN_PASSWORD);
+
+    if (!isPasswordMatch) {
+      return NextResponse.json(
+        { error: "Username atau password salah. Silakan coba lagi." },
+        { status: 401 }
+      );
+    }
+
+    const token = await signSession({
+      userId: user.id,
+      username: user.username,
+      nama: user.nama,
+      role: user.role,
+      authenticated: true,
+    });
+
     const response = NextResponse.json({
       success: true,
-      message: "Login berhasil. Selamat datang kembali!",
+      message: `Login berhasil. Selamat datang, ${user.nama}!`,
+      user: {
+        userId: user.id,
+        username: user.username,
+        nama: user.nama,
+        role: user.role,
+      },
     });
 
     const isProd = process.env.NODE_ENV === "production";

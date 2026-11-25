@@ -6,15 +6,20 @@ import {
 } from "@/lib/sheets";
 import { formatPeriode, getCurrentPeriodeJakarta } from "@/lib/format";
 import { MonthHistorySummary } from "@/lib/types";
+import { getSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "Sesi tidak valid." }, { status: 401 });
+    }
     const [allPeriods, allPemasukan, allPengeluaran] = await Promise.all([
-      getAllDistinctPeriods(),
-      getPemasukanList(),
-      getPengeluaranList(),
+      getAllDistinctPeriods(session.userId),
+      getPemasukanList(undefined, session.userId),
+      getPengeluaranList(undefined, session.userId),
     ]);
 
     const currentPeriode = getCurrentPeriodeJakarta();
