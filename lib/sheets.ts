@@ -40,7 +40,7 @@ interface CacheEntry<T> {
   timestamp: number;
 }
 const cache: Record<string, CacheEntry<any>> = {};
-const CACHE_TTL_MS = 5000;
+const CACHE_TTL_MS = 15000;
 
 function getCached<T>(key: string): T | null {
   const entry = cache[key];
@@ -121,141 +121,141 @@ function getSpreadsheetId(): string {
  * Ensures that the 4 required sheets exist with proper headers and initial seed data.
  */
 let isInitialized = false;
+let initPromise: Promise<void> | null = null;
+
 export async function ensureSpreadsheetInitialized(): Promise<void> {
   if (!isGoogleSheetsConfigured()) {
     return;
   }
   if (isInitialized) return;
+  if (initPromise) return initPromise;
 
-  const sheets = getSheets();
-  const spreadsheetId = getSpreadsheetId();
+  initPromise = (async () => {
+    const sheets = getSheets();
+    const spreadsheetId = getSpreadsheetId();
 
-  try {
-    const meta = await sheets.spreadsheets.get({ spreadsheetId });
-    const existingSheetTitles = (meta.data.sheets || []).map(
-      (s) => s.properties?.title || ""
-    );
+    try {
+      const meta = await sheets.spreadsheets.get({ spreadsheetId });
+      const existingSheetTitles = (meta.data.sheets || []).map(
+        (s) => s.properties?.title || ""
+      );
 
-    const sheetsToCreate: string[] = [];
-    for (const title of Object.values(SHEET_NAMES)) {
-      if (!existingSheetTitles.includes(title)) {
-        sheetsToCreate.push(title);
+      const sheetsToCreate: string[] = [];
+      for (const title of Object.values(SHEET_NAMES)) {
+        if (!existingSheetTitles.includes(title)) {
+          sheetsToCreate.push(title);
+        }
       }
-    }
 
-    if (sheetsToCreate.length > 0) {
-      // Add missing sheets
-      await sheets.spreadsheets.batchUpdate({
-        spreadsheetId,
-        requestBody: {
-          requests: sheetsToCreate.map((title) => ({
-            addSheet: {
-              properties: { title },
-            },
-          })),
-        },
-      });
-    }
-
-    // Now check headers and initial data for each sheet
-    for (const [sheetTitle, headers] of Object.entries(HEADERS)) {
-      const res = await sheets.spreadsheets.values.get({
-        spreadsheetId,
-        range: `${sheetTitle}!A1:Z1`,
-      });
-
-      const currentHeader = res.data.values?.[0] || [];
-      const needsHeader =
-        currentHeader.length === 0 ||
-        headers.some((h, i) => currentHeader[i] !== h);
-
-      if (needsHeader) {
-        await sheets.spreadsheets.values.update({
+      if (sheetsToCreate.length > 0) {
+        await sheets.spreadsheets.batchUpdate({
           spreadsheetId,
-          range: `${sheetTitle}!A1:${String.fromCharCode(64 + headers.length)}1`,
-          valueInputOption: "USER_ENTERED",
           requestBody: {
-            values: [headers],
+            requests: sheetsToCreate.map((title) => ({
+              addSheet: {
+                properties: { title },
+              },
+            })),
           },
         });
       }
 
-      // Check if Anggaran needs initial seed
-      if (sheetTitle === SHEET_NAMES.ANGGARAN) {
-        const rowsRes = await sheets.spreadsheets.values.get({
-          spreadsheetId,
-          range: `${sheetTitle}!A2:D`,
-        });
-        if (!rowsRes.data.values || rowsRes.data.values.length === 0) {
-          const initialRows = INITIAL_ANGGARAN.map((a) => [
-            a.pos,
-            a.jatah_bulanan,
-            a.jatah_harian_opsional || 0,
-            "admin",
-          ]);
-          await sheets.spreadsheets.values.append({
+      // Batch read all headers and seed check ranges in a single API call
+      const sheetTitles = Object.keys(HEADERS);
+      const batchRanges = [
+        ...sheetTitles.map((t) => `${t}!A1:Z1`),
+        `${SHEET_NAMES.ANGGARAN}!A2:D`,
+        `${SHEET_NAMES.PENGATURAN}!A2:C`,
+        `${SHEET_NAMES.USERS}!A2:G`,
+      ];
+
+      const batchRes = await sheets.spreadsheets.values.batchGet({
+        spreadsheetId,
+        ranges: batchRanges,
+      });
+
+      const valueRanges = batchRes.data.valueRanges || [];
+
+      for (let idx = 0; idx < sheetTitles.length; idx++) {
+        const sheetTitle = sheetTitles[idx];
+        const headers = HEADERS[sheetTitle];
+        const currentHeader = valueRanges[idx]?.values?.[0] || [];
+        const needsHeader =
+          currentHeader.length === 0 ||
+          headers.some((h, i) => currentHeader[i] !== h);
+
+        if (needsHeader) {
+          await sheets.spreadsheets.values.update({
             spreadsheetId,
-            range: `${sheetTitle}!A2:D`,
+            range: `${sheetTitle}!A1:${String.fromCharCode(64 + headers.length)}1`,
             valueInputOption: "USER_ENTERED",
-            requestBody: { values: initialRows },
+            requestBody: { values: [headers] },
           });
         }
       }
 
-      // Check if Pengaturan needs initial seed
-      if (sheetTitle === SHEET_NAMES.PENGATURAN) {
-        const rowsRes = await sheets.spreadsheets.values.get({
+      const anggaranRows = valueRanges[sheetTitles.length]?.values || [];
+      if (anggaranRows.length === 0) {
+        const initialRows = INITIAL_ANGGARAN.map((a) => [
+          a.pos,
+          a.jatah_bulanan,
+          a.jatah_harian_opsional || 0,
+          "admin",
+        ]);
+        await sheets.spreadsheets.values.update({
           spreadsheetId,
-          range: `${sheetTitle}!A2:C`,
+          range: `${SHEET_NAMES.ANGGARAN}!A2:D${initialRows.length + 1}`,
+          valueInputOption: "USER_ENTERED",
+          requestBody: { values: initialRows },
         });
-        if (!rowsRes.data.values || rowsRes.data.values.length === 0) {
-          const initialRows = Object.entries(INITIAL_PENGATURAN).map(
-            ([key, val]) => [key, String(val), "admin"]
-          );
-          await sheets.spreadsheets.values.append({
-            spreadsheetId,
-            range: `${sheetTitle}!A2:C`,
-            valueInputOption: "USER_ENTERED",
-            requestBody: { values: initialRows },
-          });
-        }
       }
 
-      // Check if Users needs initial Admin seed
-      if (sheetTitle === SHEET_NAMES.USERS) {
-        const rowsRes = await sheets.spreadsheets.values.get({
+      const pengaturanRows = valueRanges[sheetTitles.length + 1]?.values || [];
+      if (pengaturanRows.length === 0) {
+        const initialRows = Object.entries(INITIAL_PENGATURAN).map(
+          ([key, val]) => [key, String(val), "admin"]
+        );
+        await sheets.spreadsheets.values.update({
           spreadsheetId,
-          range: `${sheetTitle}!A2:G`,
+          range: `${SHEET_NAMES.PENGATURAN}!A2:C${initialRows.length + 1}`,
+          valueInputOption: "USER_ENTERED",
+          requestBody: { values: initialRows },
         });
-        if (!rowsRes.data.values || rowsRes.data.values.length === 0) {
-          const adminPassword = process.env.ADMIN_PASSWORD || "admin123";
-          await sheets.spreadsheets.values.append({
-            spreadsheetId,
-            range: `${sheetTitle}!A2:G`,
-            valueInputOption: "USER_ENTERED",
-            requestBody: {
-              values: [
-                [
-                  "admin",
-                  "admin",
-                  "Admin Utama",
-                  hashPassword(adminPassword),
-                  "admin",
-                  "true",
-                  new Date().toISOString(),
-                ],
+      }
+
+      const userRows = valueRanges[sheetTitles.length + 2]?.values || [];
+      if (userRows.length === 0) {
+        const adminPassword = process.env.ADMIN_PASSWORD || "admin123";
+        await sheets.spreadsheets.values.update({
+          spreadsheetId,
+          range: `${SHEET_NAMES.USERS}!A2:G2`,
+          valueInputOption: "USER_ENTERED",
+          requestBody: {
+            values: [
+              [
+                "admin",
+                "admin",
+                "Admin Utama",
+                hashPassword(adminPassword),
+                "admin",
+                "true",
+                new Date().toISOString(),
               ],
-            },
-          });
-        }
+            ],
+          },
+        });
       }
-    }
 
-    isInitialized = true;
-  } catch (err: any) {
-    console.error("Gagal inisialisasi spreadsheet:", err?.message || err);
-    throw err;
-  }
+      isInitialized = true;
+    } catch (err: any) {
+      console.error("Gagal inisialisasi spreadsheet:", err?.message || err);
+      throw err;
+    } finally {
+      initPromise = null;
+    }
+  })();
+
+  return initPromise;
 }
 
 // ==========================================
@@ -855,9 +855,15 @@ export async function getUsersList(): Promise<AppUser[]> {
   });
 
   const rows = res.data.values || [];
-  const list: AppUser[] = rows
-    .filter((row) => row[0] && row[1])
-    .map((row) => ({
+  const seen = new Set<string>();
+  const list: AppUser[] = [];
+
+  for (const row of rows) {
+    if (!row[0] || !row[1]) continue;
+    const uname = String(row[1]).toLowerCase();
+    if (seen.has(uname)) continue;
+    seen.add(uname);
+    list.push({
       id: String(row[0]),
       username: String(row[1]),
       nama: String(row[2] || row[1]),
@@ -865,7 +871,8 @@ export async function getUsersList(): Promise<AppUser[]> {
       role: (String(row[4]) === "admin" ? "admin" : "user") as UserRole,
       aktif: String(row[5]).toLowerCase() !== "false",
       dibuat_pada: String(row[6] || ""),
-    }));
+    });
+  }
 
   setCached(cacheKey, list);
   return list;

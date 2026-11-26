@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Plus, X, AlertTriangle, Check, Loader2, Sparkles } from "lucide-react";
 import { formatRupiah, getTodayJakarta, parseRupiahInput } from "@/lib/format";
 import { Anggaran, PosProgress } from "@/lib/types";
+import { PosSelect } from "./PosSelect";
 
 interface QuickExpenseModalProps {
   onExpenseAdded?: () => void;
@@ -248,27 +249,22 @@ export function QuickExpenseModal({ onExpenseAdded }: QuickExpenseModalProps) {
                 <label className="block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400 mb-1">
                   Pos Anggaran
                 </label>
-                <select
+                <PosSelect
                   value={pos}
-                  onChange={(e) => setPos(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {anggaranList.map((a) => (
-                    <option key={a.pos} value={a.pos}>
-                      {a.pos}
-                    </option>
-                  ))}
-                  {anggaranList.length === 0 && (
-                    <>
-                      <option value="Makan">Makan</option>
-                      <option value="Tabungan">Tabungan</option>
-                      <option value="Bensin">Bensin</option>
-                      <option value="Kebutuhan Pokok">Kebutuhan Pokok</option>
-                      <option value="Dana Tak Terduga">Dana Tak Terduga</option>
-                      <option value="Jajan & Rokok">Jajan & Rokok</option>
-                    </>
-                  )}
-                </select>
+                  onChange={setPos}
+                  options={
+                    anggaranList.length > 0
+                      ? anggaranList.map((a) => a.pos)
+                      : [
+                          "Makan",
+                          "Tabungan",
+                          "Bensin",
+                          "Kebutuhan Pokok",
+                          "Dana Tak Terduga",
+                          "Jajan & Rokok",
+                        ]
+                  }
+                />
               </div>
 
               {/* Keterangan */}

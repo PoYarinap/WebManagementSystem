@@ -23,6 +23,7 @@ import { Anggaran, Pengeluaran } from "@/lib/types";
 import { PeriodSelector } from "@/components/PeriodSelector";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ModalPortal } from "@/components/ModalPortal";
+import { PosSelect } from "@/components/PosSelect";
 
 export default function TransaksiPage() {
   const [periode, setPeriode] = useState(getCurrentPeriodeJakarta());
@@ -424,17 +425,11 @@ export default function TransaksiPage() {
                 <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">
                   Pos Anggaran
                 </label>
-                <select
+                <PosSelect
                   value={editPos}
-                  onChange={(e) => setEditPos(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm font-medium text-slate-900 dark:text-white"
-                >
-                  {anggaranList.map((a) => (
-                    <option key={a.pos} value={a.pos}>
-                      {a.pos}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setEditPos}
+                  options={anggaranList.map((a) => a.pos)}
+                />
               </div>
 
               <div>
